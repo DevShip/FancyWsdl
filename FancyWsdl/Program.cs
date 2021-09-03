@@ -1,7 +1,9 @@
 ﻿using System;
+using System.Configuration;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Reflection;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Web;
@@ -12,6 +14,17 @@ namespace FancyWsdl
 {
     public class Program
     {
+        public static string AssemblyDirectory
+        {
+            get
+            {
+                string codeBase = Assembly.GetExecutingAssembly().CodeBase;
+                UriBuilder uri = new UriBuilder(codeBase);
+                string path = Uri.UnescapeDataString(uri.Path);
+                return Path.GetDirectoryName(path);
+            }
+        }
+
         private static void Run(string fileName, string args, string path)
         {
             var info = new ProcessStartInfo(fileName, args);
@@ -22,13 +35,26 @@ namespace FancyWsdl
         // Thx https://github.com/Kaupisch-IT/FancyWsdl
         static void Main(string[] args)
         {
-            Console.WriteLine("\nПрограмма FancyWsdl адаптированная под ГИИС ДМДК - http://dmdk.ru\n");
+            
+            Directory.SetCurrentDirectory(AssemblyDirectory);
 
+            Console.WriteLine("\nПрограмма FancyWsdl адаптированная под ГИИС ДМДК - http://dmdk.ru\n");
 
             if (args.Length != 3)
             {
-                Console.WriteLine("Программа требует 3 аргумента например: FancyWsdl.exe ИмяФайла.cs ОбластьИменCsФайла ИмяИлиАдресСхемыWsdl\n");
-                return;
+                if (ConfigurationManager.AppSettings.HasKeys()
+                    && ConfigurationManager.AppSettings["CSFileName"].TryGetNotNullOrEmpty(out var csName)
+                    && ConfigurationManager.AppSettings["Namespace"].TryGetNotNullOrEmpty(out var nsName)
+                    && ConfigurationManager.AppSettings["WSDLscheme"].TryGetNotNullOrEmpty(out var wsdlName))
+                {
+                    args = new[] { csName, nsName, wsdlName };
+                }
+                else
+                {
+                    Console.WriteLine("Программа требует заполнение .app.Settings или 3 аргумента программы например: FancyWsdl.exe ИмяФайла.cs ОбластьИменCsФайла ИмяИлиАдресСхемыWsdl\n");
+                    return;
+                }
+              
             }
 
             var cfName = "ServiceReference\\" + args[0];
@@ -48,7 +74,7 @@ namespace FancyWsdl
 
                 var encoding = Encoding.UTF8;
                 var fileContent = File.ReadAllText(path, encoding);
-                
+
                 Console.WriteLine($"Форматирование файла: {path}");
 
                 // enumerate all class definitions
@@ -187,15 +213,15 @@ namespace FancyWsdl
                 // add annotations/documentation from XML schema
                 fileContent = AddAnnotations(args, fileContent);
 
-               // // use usings
-               //var usings = Regex.Matches(fileContent, @"(?<namespace>System(\.\w+)*)\.\w+(?=\([^\]]*\)]| \w+ = |<| )|((?<namespace>System(\.\w+)*)(\.\w+){2},)|(using (?<namespace>\S+);)").AsList().Select(m => m.Groups["namespace"].Value.Trim('.')).Distinct().ToArray();
-               // foreach (var usingNamespace in usings.OrderByDescending(u => u.Length))
-               //     fileContent = fileContent.Replace(usingNamespace + ".", "");
-               // var usingDeclaration = string.Join(Environment.NewLine, usings.OrderBy(u => u).Select(u => $"using {u};")) + Environment.NewLine;
-               // if (Regex.IsMatch(fileContent, @"using \S+;"))
-               //     fileContent = Regex.Replace(fileContent, @"(using \S+;\s?\n)+", usingDeclaration);
-               // else
-               //     fileContent = usingDeclaration + Environment.NewLine + fileContent;
+                // // use usings
+                //var usings = Regex.Matches(fileContent, @"(?<namespace>System(\.\w+)*)\.\w+(?=\([^\]]*\)]| \w+ = |<| )|((?<namespace>System(\.\w+)*)(\.\w+){2},)|(using (?<namespace>\S+);)").AsList().Select(m => m.Groups["namespace"].Value.Trim('.')).Distinct().ToArray();
+                // foreach (var usingNamespace in usings.OrderByDescending(u => u.Length))
+                //     fileContent = fileContent.Replace(usingNamespace + ".", "");
+                // var usingDeclaration = string.Join(Environment.NewLine, usings.OrderBy(u => u).Select(u => $"using {u};")) + Environment.NewLine;
+                // if (Regex.IsMatch(fileContent, @"using \S+;"))
+                //     fileContent = Regex.Replace(fileContent, @"(using \S+;\s?\n)+", usingDeclaration);
+                // else
+                //     fileContent = usingDeclaration + Environment.NewLine + fileContent;
 
                 // use attribute shortcut
                 fileContent = fileContent.Replace("Attribute()]", "]");
@@ -215,7 +241,7 @@ namespace FancyWsdl
         /// <returns></returns>
         private static string AddAnnotations(string[] args, string fileContent)
         {
-            
+
 
             foreach (var schemaUrl in args.Skip(2))
             {
@@ -246,7 +272,7 @@ namespace FancyWsdl
                         }
 
                         text = HttpUtility.HtmlEncode(string.Join("\n", lines).Trim());
-                        return text.Contains("\n") ? $"/// <summary>{indentSpace}/// {Regex.Replace(text, "\r?\n", indentSpace + "/// ")}{indentSpace}/// </summary>" 
+                        return text.Contains("\n") ? $"/// <summary>{indentSpace}/// {Regex.Replace(text, "\r?\n", indentSpace + "/// ")}{indentSpace}/// </summary>"
                             : $"/// <summary> {text} </summary>";
                     }
 
@@ -346,7 +372,7 @@ namespace FancyWsdl
                     }
 
                     //if (rootName.EndsWith("DataType"))
-                        classDocumentation = GetClassDocumentation(xmlDocument, rootName, $"/*[@name='{{name}}']//*[contains(name(),'documentation')]");
+                    classDocumentation = GetClassDocumentation(xmlDocument, rootName, $"/*[@name='{{name}}']//*[contains(name(),'documentation')]");
                     //else
                     //    classDocumentation = GetRecursiveElement(xmlDocument,
                     //    $"/*[@name='{rootName}']//*[contains(name(),'documentation')]", 10);
@@ -395,11 +421,11 @@ namespace FancyWsdl
                 if (cName == null)
                 {
                     name = name.Remove(name.Length - 1, 1);
-                    while (name.Length > 0 && !char.IsUpper(name[name.Length-1]))
+                    while (name.Length > 0 && !char.IsUpper(name[name.Length - 1]))
                     {
                         name = name.Remove(name.Length - 1, 1);
                     }
-                    if (name.Length>0)
+                    if (name.Length > 0)
                         name = name.Remove(name.Length - 1, 1);
                 }
                 else
