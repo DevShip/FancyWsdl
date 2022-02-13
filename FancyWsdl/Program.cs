@@ -32,10 +32,11 @@ namespace FancyWsdl
             Process.Start(info)?.WaitForExit();
         }
 
+        static string PascalCase(string s) => s;// Regex.Replace(NormalizeName(s), @"(^|\s+)(?<letter>\S)", m => m.Groups["letter"].Value.ToUpper());
+
         // Thx https://github.com/Kaupisch-IT/FancyWsdl
         static void Main(string[] args)
         {
-            
             Directory.SetCurrentDirectory(AssemblyDirectory);
 
             Console.WriteLine("\nПрограмма FancyWsdl адаптированная под ГИИС ДМДК - http://dmdk.ru\n");
@@ -54,7 +55,7 @@ namespace FancyWsdl
                     Console.WriteLine("Программа требует заполнение .app.Settings или 3 аргумента программы например: FancyWsdl.exe ИмяФайла.cs ОбластьИменCsФайла ИмяИлиАдресСхемыWsdl\n");
                     return;
                 }
-              
+
             }
 
             var cfName = "ServiceReference\\" + args[0];
@@ -62,11 +63,12 @@ namespace FancyWsdl
                 File.Delete(cfName);
 
             //  /importXmlTypes /messageContract  /tcv:Version35  /out={args[0]}
-            Run("dotnet-svcutil", $"{args[2]} --noTypeReuse  --sync -n \"*,{args[1]}\" -d \"ServiceReference\" -o \"{args[0]}\" -tf \"netstandard2.0\"", Directory.GetCurrentDirectory());
+            // --noTypeReuse 
+            Run("dotnet-svcutil", $"{args[2]}  -n \"*,{args[1]}\" -d \"ServiceReference\" -o \"{args[0]}\" -tf \"netstandard2.0\"", Directory.GetCurrentDirectory());
 
             args[0] = cfName;
 
-            static string pascalCase(string s) => s; // Regex.Replace(s,@"(^|\s+)(?<letter>\S)",m => m.Groups["letter"].Value.ToUpper());
+
 
             if (args.Any())
             {
@@ -76,25 +78,24 @@ namespace FancyWsdl
                 var fileContent = File.ReadAllText(path, encoding);
 
                 Console.WriteLine($"Форматирование файла: {path}");
-
+                bool anotaded=false;
+            ret:;
                 // enumerate all class definitions
                 foreach (Match classMatch in Regex.Matches(fileContent, @"^(?<space>\s*)public partial class (?<className>\S+).*?\n(\k<space>)}", RegexOptions.Singleline | RegexOptions.Multiline))
                 {
                     var className = classMatch.Groups["className"].Value;
                     var classContent = classMatch.Value;
 
-
-                    // property name in XmlElementAttribute
-                    foreach (Match match in Regex.Matches(classContent, @"\[(?<xmlElementAttribute>(System.Xml.Serialization.)?XmlElement(Attribute)?\()(""(?<elementName>[^""]+)"")?[^\)]*\)\]\s+public (?<propertyType>\S+) (?<propertyName>\S+) "))
-                    {
-                        var xmlElementAttribute = match.Groups["xmlElementAttribute"].Value;
-                        var elementName = match.Groups["elementName"].Value;
-                        var propertyType = match.Groups["propertyType"].Value;
-                        var propertyName = match.Groups["propertyName"].Value;
-
-                        if (string.IsNullOrEmpty(elementName))
-                            classContent = classContent.Replace(match.Value, match.Value.Replace(xmlElementAttribute, xmlElementAttribute + "\"" + propertyName + "\", "));
-                    }
+                    // property name in XmlElementAttribute    
+                    //foreach (Match match in Regex.Matches(classContent, @"\[(?<xmlElementAttribute>(System.Xml.Serialization.)?XmlElement(Attribute)?\()(""(?<elementName>[^""]+)"")?[^\)]*\)\]\s+public (?<propertyType>\S+) (?<propertyName>\S+)"))
+                    //{
+                    //    var xmlElementAttribute = match.Groups["xmlElementAttribute"].Value;
+                    //    var elementName = match.Groups["elementName"].Value;
+                    //    var propertyType = match.Groups["propertyType"].Value;
+                    //    var propertyName = match.Groups["propertyName"].Value;
+                    //    if (string.IsNullOrEmpty(elementName))
+                    //        classContent = classContent.Replace(match.Value, match.Value.Replace(xmlElementAttribute, xmlElementAttribute + "\"" + propertyName + "\", "));
+                    //}
 
                     // auto-implemented getters & setters
                     foreach (Match match in Regex.Matches(classContent, @"public (?<propertyType>\S+) (?<propertyName>\S+)(?<getterSetter>\s+\{\s+get\s+\{\s+return this\.(?<fieldName>[^;]+);\s+}\s+set\s+\{\s+[^;]+;\s+\}\s+\})"))
@@ -116,7 +117,10 @@ namespace FancyWsdl
                         var propertyName = match.Groups["propertyName"].Value;
                         var post = match.Groups["post"].Value;
 
-                        var newPropertyName = pascalCase(propertyName);
+                        var newPropertyName = PascalCase(propertyName);
+
+                        if (newPropertyName != propertyName)
+                            pre = $"[System.Xml.Serialization.XmlElementAttribute(ElementName = \"{propertyName}\")]\n\t\t" + pre;
 
                         classContent = classContent.Replace(match.Value, pre + newPropertyName + post);
                         classContent = classContent.Replace($"this.{propertyName} ", $"this.{newPropertyName} ");
@@ -156,12 +160,12 @@ namespace FancyWsdl
                         var methodName2 = match.Groups["methodName2"].Value;
                         var post = match.Groups["post"].Value;
 
-                        classContent = classContent.Replace(match.Value, pre + pascalCase(methodName) + inter + ((!string.IsNullOrEmpty(methodName2)) ? "nameof(" + pascalCase(methodName2) + ")" : "") + post);
+                        classContent = classContent.Replace(match.Value, pre + PascalCase(methodName) + inter + ((!string.IsNullOrEmpty(methodName2)) ? "nameof(" + PascalCase(methodName2) + ")" : "") + post);
                     }
                     foreach (Match match in Regex.Matches(classContent, @"public void (?<methodName>[^\s\(]+)"))
                     {
                         var methodName = match.Groups["methodName"].Value;
-                        classContent = Regex.Replace(classContent, $@"(?<pre>( |\.)){methodName}(?<post>[\(\)])", m => m.Groups["pre"].Value + pascalCase(methodName) + m.Groups["post"].Value);
+                        classContent = Regex.Replace(classContent, $@"(?<pre>( |\.)){methodName}(?<post>[\(\)])", m => m.Groups["pre"].Value + PascalCase(methodName) + m.Groups["post"].Value);
                     }
 
                     fileContent = fileContent.Replace(classMatch.Value, classContent);
@@ -186,7 +190,7 @@ namespace FancyWsdl
                             enumContent = enumContent.Replace(valueMatch.Value, space + $"[System.Xml.Serialization.XmlEnumAttribute(\"{enumValue}\")]" + valueMatch.Value);
 
                         // enum value with uppercase first letter
-                        enumContent = Regex.Replace(enumContent, @$"\b{enumValue},", $"{pascalCase((Regex.IsMatch(enumValueName, @"^[a-zA-Z_][\w\s]*$")) ? enumValueName : enumValue)},");
+                        enumContent = Regex.Replace(enumContent, @$"\b{enumValue},", $"{PascalCase((Regex.IsMatch(enumValueName, @"^[a-zA-Z_][\w\s]*$")) ? enumValueName : enumValue)},");
                     }
                     fileContent = fileContent.Replace(enumMatch.Value, enumContent);
                 }
@@ -207,11 +211,8 @@ namespace FancyWsdl
                         fileContent = Regex.Replace(fileContent, $@"{Regex.Escape(classMatch.Value)}\b", classMatch.Value.Replace(xmlRootAttribute, xmlRootAttribute + "\"" + className + "\", "));
 
                     // type name with uppercase first letter
-                    fileContent = Regex.Replace(fileContent, $@"(?<!"")\b{Regex.Escape(className)}\b(?!""|(\(\[))", pascalCase(className));
+                    fileContent = Regex.Replace(fileContent, $@"(?<!"")\b{Regex.Escape(className)}\b(?!""|(\(\[))", PascalCase(className));
                 }
-
-                // add annotations/documentation from XML schema
-                fileContent = AddAnnotations(args, fileContent);
 
                 // // use usings
                 //var usings = Regex.Matches(fileContent, @"(?<namespace>System(\.\w+)*)\.\w+(?=\([^\]]*\)]| \w+ = |<| )|((?<namespace>System(\.\w+)*)(\.\w+){2},)|(using (?<namespace>\S+);)").AsList().Select(m => m.Groups["namespace"].Value.Trim('.')).Distinct().ToArray();
@@ -223,14 +224,88 @@ namespace FancyWsdl
                 // else
                 //     fileContent = usingDeclaration + Environment.NewLine + fileContent;
 
+
                 // use attribute shortcut
                 fileContent = fileContent.Replace("Attribute()]", "]");
                 fileContent = fileContent.Replace("Attribute(", "(");
+
+                fileContent=AddAnnotations(args, fileContent);
+
+                fileContent = Fix(fileContent);
 
                 File.WriteAllText(path, fileContent, encoding);
             }
 
             Console.WriteLine("Готово");
+        }
+
+        public static string Fix(string fileContent)
+        {
+            static string modPascalCase(string s) => Regex.Replace(NormalizeClassesName(s), @"(^|\s+)(?<letter>\S)", m => m.Groups["letter"].Value.ToUpper());
+
+            // enumerate all class definitions
+            foreach (Match classMatch in Regex.Matches(fileContent, @"^(?<space>\s*)public partial class (?<className>\S+).*?\n(\k<space>)}", RegexOptions.Singleline | RegexOptions.Multiline))
+            {
+                var className = classMatch.Groups["className"].Value;
+                var classContent = classMatch.Value;
+
+                // property names with uppercase first letter
+                foreach (Match match in Regex.Matches(classContent, @"(?<pre>public \S+ )(?<propertyName>\S+)(?<post>\s+\{)"))
+                {
+                    var pre = match.Groups["pre"].Value;
+                    var propertyName = match.Groups["propertyName"].Value;
+                    var post = match.Groups["post"].Value;
+
+                    var newPropertyName = modPascalCase(propertyName);
+
+                    if (newPropertyName != propertyName)
+                        pre = $"[System.Xml.Serialization.XmlElementAttribute(ElementName = \"{propertyName}\")]\n\t\t" + pre;
+
+                    classContent = classContent.Replace(match.Value, pre + newPropertyName + post);
+                    classContent = classContent.Replace($"this.{propertyName} ", $"this.{newPropertyName} ");
+                    classContent = classContent.Replace($@".SoapHeaderAttribute(""{propertyName}"")", $@".SoapHeaderAttribute(""{newPropertyName}"")");
+                }
+
+                // method name with uppercase first letter
+                foreach (Match match in Regex.Matches(classContent, @"(?<pre>public \S+ (Begin|End)?)(?<methodName>[^\s\(]+)(?<inter>(Async)?[^\n]*(\n[^\n]*){1,4}this\.(Begin|End)?Invoke(Async)?\()(""(?<methodName2>[^""]+)"")?(?<post>)"))
+                {
+                    var pre = match.Groups["pre"].Value;
+                    var methodName = match.Groups["methodName"].Value;
+                    var inter = match.Groups["inter"].Value;
+                    var methodName2 = match.Groups["methodName2"].Value;
+                    var post = match.Groups["post"].Value;
+
+                    classContent = classContent.Replace(match.Value, pre + modPascalCase(methodName) + inter + ((!string.IsNullOrEmpty(methodName2)) ? "nameof(" + modPascalCase(methodName2) + ")" : "") + post);
+                }
+                foreach (Match match in Regex.Matches(classContent, @"public void (?<methodName>[^\s\(]+)"))
+                {
+                    var methodName = match.Groups["methodName"].Value;
+                    classContent = Regex.Replace(classContent, $@"(?<pre>( |\.)){methodName}(?<post>[\(\)])", m => m.Groups["pre"].Value + modPascalCase(methodName) + m.Groups["post"].Value);
+                }
+
+                fileContent = fileContent.Replace(classMatch.Value, classContent);
+            }
+
+            // enumerate all type definitions
+            foreach (Match classMatch in Regex.Matches(fileContent, @"(\[(?<xmlRootAttribute>(System.Xml.Serialization.)?XmlRoot(Attribute)?\()(""(?<rootName>[^""]+)"")?[^\)]*\)\])?(?<space>\s+)(?<classDefinition>public (partial class|enum) (?<className>\S+))"))
+            {
+                var xmlRootAttribute = classMatch.Groups["xmlRootAttribute"].Value;
+                var rootName = classMatch.Groups["rootName"].Value;
+                var space = classMatch.Groups["space"].Value;
+                var classDefinition = classMatch.Groups["classDefinition"].Value;
+                var className = classMatch.Groups["className"].Value;
+
+                // type name in XmlRootAttribute
+                if (string.IsNullOrEmpty(xmlRootAttribute))
+                    fileContent = Regex.Replace(fileContent, $@"{Regex.Escape(classMatch.Value)}\b", classMatch.Value.Replace(classDefinition, $"[System.Xml.Serialization.XmlRootAttribute(\"{className}\")]" + space + classDefinition));
+                else if (string.IsNullOrEmpty(rootName))
+                    fileContent = Regex.Replace(fileContent, $@"{Regex.Escape(classMatch.Value)}\b", classMatch.Value.Replace(xmlRootAttribute, xmlRootAttribute + "\"" + className + "\", "));
+
+                // type name with uppercase first letter
+                fileContent = Regex.Replace(fileContent, $@"(?<!"")\b{Regex.Escape(className)}\b(?!""|(\(\[))", modPascalCase(className));
+            }
+
+            return fileContent;
         }
 
         /// <summary>
@@ -241,8 +316,6 @@ namespace FancyWsdl
         /// <returns></returns>
         private static string AddAnnotations(string[] args, string fileContent)
         {
-
-
             foreach (var schemaUrl in args.Skip(2))
             {
                 Console.WriteLine($"Документирование файла: {schemaUrl}");
@@ -263,7 +336,7 @@ namespace FancyWsdl
                     var classContent = classMatch.Value;
                     var rootName = classMatch.Groups["rootName"].Value;
 
-                    static string toSummary(string text, string indentSpace)
+                    static string ToSummary(string text, string indentSpace)
                     {
                         var lines = text.Trim().Replace("\r", "").Split('\n');
                         for (var i = 0; i < lines.Length; i++)
@@ -293,7 +366,7 @@ namespace FancyWsdl
 
                         if (elementDocumentation != null)
                         {
-                            elementDocumentation = toSummary(elementDocumentation, elementMatch.Groups["space"].Value);
+                            elementDocumentation = ToSummary(elementDocumentation, elementMatch.Groups["space"].Value);
                             classContent = Regex.Replace(classContent,
                                 @$"(?<remarks>/// <remarks/>)(?<remainder>(\s*\[[^\n]+\])*\s*public (?<propertyType>\S+) {propertyName}\b)",
                                 m => elementDocumentation + m.Groups["remainder"].Value,
@@ -325,7 +398,7 @@ namespace FancyWsdl
                                 ?.InnerText;
                             if (elementDocumentation != null)
                             {
-                                elementDocumentation = toSummary(elementDocumentation, elementMatch.Groups["space"].Value);
+                                elementDocumentation = ToSummary(elementDocumentation, elementMatch.Groups["space"].Value);
                                 classContent = Regex.Replace(classContent,
                                     @$"(?<remarks>/// <remarks/>)(?<remainder>(\s*\[[^\n]+\])*\s*public (?<returnType>\S+) {methodName}\b)",
                                     m => elementDocumentation + m.Groups["remainder"].Value,
@@ -350,7 +423,7 @@ namespace FancyWsdl
 
                         if (enumDocumentation != null)
                         {
-                            enumDocumentation = toSummary(enumDocumentation, enumMatch.Groups["space"].Value);
+                            enumDocumentation = ToSummary(enumDocumentation, enumMatch.Groups["space"].Value);
                             classContent = Regex.Replace(classContent,
                                 @$"(?<remarks>/// <remarks/>)(?<remainder>(\s*\[[^\n]+\])*\s*{enumValue}\b)",
                                 m => enumDocumentation + m.Groups["remainder"].Value,
@@ -381,7 +454,7 @@ namespace FancyWsdl
 
                     if (classDocumentation != null)
                     {
-                        classDocumentation = toSummary(classDocumentation, classMatch.Groups["space"].Value);
+                        classDocumentation = ToSummary(classDocumentation, classMatch.Groups["space"].Value);
                         fileContent = Regex.Replace(fileContent,
                             @$"(?<remarks>/// <remarks/>)(?<remainder>(\s*\[[^\n]+\])*\s*public (partial class|enum) {className}\b)",
                             m => classDocumentation + m.Groups["remainder"].Value,
@@ -409,6 +482,8 @@ namespace FancyWsdl
 
         private static string FindClassName(XmlNode xmlDocument, string name)
         {
+            if (string.IsNullOrEmpty(name)) return null;
+
             var orig = name;
 
             var qry = $"/*[@name='{{name}}']//*[contains(name(),'documentation')]";
@@ -457,7 +532,6 @@ namespace FancyWsdl
             return null;
         }
 
-
         private static string GetClassDocumentation(XmlNode xmlDocument, string rootName, string qry)
         {
             rootName = TrimWcfEndsStatements(rootName);
@@ -492,6 +566,14 @@ namespace FancyWsdl
             return res;
         }
 
+
+        public static string RemoveEnd(string src, string entry)
+        {
+            if (src.StartsWith(entry))
+                src = src.Substring(0, src.Length - entry.Length);
+            return src;
+        }
+
         /// <summary>
         /// Убирает Wcf окончания
         /// </summary>
@@ -500,21 +582,25 @@ namespace FancyWsdl
         private static string TrimWcfEndsStatements(string name)
         {
             var orig = name;
-            var els = new[] { "1", "RequestData", "ResponseDataResult", "ResponseData", };
+            var els = new[] { "1", "RequestData", "ResponseDataResult", "ResponseData" };
             foreach (var el in els)
             {
-                if (name.EndsWith(el))
-                {
-                    while (name.EndsWith(el))
-                    {
-                        name = name.Remove(name.LastIndexOf(el));
-                    }
-                }
+                name = RemoveEnd(name, el);
             }
 
             if (string.IsNullOrEmpty(name))
                 return orig;
             return name;
+        }
+
+        /// <summary>
+        /// Нормализация названий классов
+        /// </summary>
+        private static string NormalizeClassesName(string name)
+        {
+            return name.Replace("RequestRequestData", "RequestData")
+                .Replace("ResponseResponseDataResult", "ResponseDataResult")
+                .Replace("ResponseResponseData", "ResponseData");
         }
 
         /// <summary>
