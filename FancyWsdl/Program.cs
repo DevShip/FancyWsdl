@@ -33,6 +33,7 @@ namespace FancyWsdl
         }
 
         static string PascalCase(string s) => s;// Regex.Replace(NormalizeName(s), @"(^|\s+)(?<letter>\S)", m => m.Groups["letter"].Value.ToUpper());
+        static string modPascalCase(string s) => Regex.Replace(NormalizeClassesName(s), @"(^|\s+)(?<letter>\S)", m => m.Groups["letter"].Value.ToUpper());
 
         // Thx https://github.com/Kaupisch-IT/FancyWsdl
         static void Main(string[] args)
@@ -64,7 +65,10 @@ namespace FancyWsdl
 
             //  /importXmlTypes /messageContract  /tcv:Version35  /out={args[0]}
             // --noTypeReuse 
-            Run("dotnet-svcutil", $"{args[2]}  -n \"*,{args[1]}\" -d \"ServiceReference\" -o \"{args[0]}\" -tf \"netstandard2.0\"", Directory.GetCurrentDirectory());
+            var arg = $"{args[2]}  --noTypeReuse  -n \"*,{args[1]}\" -d \"ServiceReference\" -o \"{args[0]}\" -tf \"netstandard2.0\"";
+            Console.WriteLine($"Running> dotnet-svcutil {arg}");
+
+            Run("dotnet-svcutil", arg, Directory.GetCurrentDirectory());
 
             args[0] = cfName;
 
@@ -76,10 +80,14 @@ namespace FancyWsdl
 
                 var encoding = Encoding.UTF8;
                 var fileContent = File.ReadAllText(path, encoding);
+                fileContent=fileContent.Replace("[System.Xml.Serialization.XmlElement]", "[System.Xml.Serialization.XmlElement()]");
+                fileContent=fileContent.Replace("[System.Xml.Serialization.XmlAttribute]", "[System.Xml.Serialization.XmlAttribute()]");
+                fileContent=fileContent.Replace("[System.Xml.Serialization.XmlAttributeAttribute]", "[System.Xml.Serialization.XmlAttributeAttribute()]");
+                fileContent=fileContent.Replace("[System.Xml.Serialization.XmlElementAttribute]", "[System.Xml.Serialization.XmlElement()]");
 
                 Console.WriteLine($"Форматирование файла: {path}");
                 bool anotaded=false;
-            ret:;
+       
                 // enumerate all class definitions
                 foreach (Match classMatch in Regex.Matches(fileContent, @"^(?<space>\s*)public partial class (?<className>\S+).*?\n(\k<space>)}", RegexOptions.Singleline | RegexOptions.Multiline))
                 {
@@ -88,14 +96,34 @@ namespace FancyWsdl
 
                     // property name in XmlElementAttribute    
                     //foreach (Match match in Regex.Matches(classContent, @"\[(?<xmlElementAttribute>(System.Xml.Serialization.)?XmlElement(Attribute)?\()(""(?<elementName>[^""]+)"")?[^\)]*\)\]\s+public (?<propertyType>\S+) (?<propertyName>\S+)"))
-                    //{
-                    //    var xmlElementAttribute = match.Groups["xmlElementAttribute"].Value;
-                    //    var elementName = match.Groups["elementName"].Value;
-                    //    var propertyType = match.Groups["propertyType"].Value;
-                    //    var propertyName = match.Groups["propertyName"].Value;
-                    //    if (string.IsNullOrEmpty(elementName))
-                    //        classContent = classContent.Replace(match.Value, match.Value.Replace(xmlElementAttribute, xmlElementAttribute + "\"" + propertyName + "\", "));
-                    //}
+                    foreach (Match match in Regex.Matches(classContent, @"\[(?<xmlElementAttribute>(System.Xml.Serialization.)?XmlElement(Attribute)?\()(""(?<elementName>[^""]+)"")?[^\)]*\)\]\s+public (?<propertyType>\S+) (?<propertyName>\S+)"))
+                    {
+                        var xmlElementAttribute = match.Groups["xmlElementAttribute"].Value;
+                        var elementName = match.Groups["elementName"].Value;
+                        var propertyType = match.Groups["propertyType"].Value;
+                        var propertyName = match.Groups["propertyName"].Value;
+                        if (string.IsNullOrEmpty(elementName))
+                        {
+                            classContent = classContent.Replace(match.Value, match.Value.Replace(xmlElementAttribute, xmlElementAttribute + "\"" + propertyName + "\", "))
+                                .Replace(", )", ")");
+                            
+                        }
+                    }
+
+                    // property name in XmlElementAttribute    
+                    //foreach (Match match in Regex.Matches(classContent, @"\[(?<xmlElementAttribute>(System.Xml.Serialization.)?XmlElement(Attribute)?\()(""(?<elementName>[^""]+)"")?[^\)]*\)\]\s+public (?<propertyType>\S+) (?<propertyName>\S+)"))
+                    foreach (Match match in Regex.Matches(classContent, @"\[(?<xmlAttribute>(System.Xml.Serialization.)?XmlAttribute(Attribute)?\()(""(?<elementName>[^""]+)"")?[^\)]*\)\]\s+public (?<propertyType>\S+) (?<propertyName>\S+)"))
+                    {
+                        var xmlElementAttribute = match.Groups["xmlAttribute"].Value;
+                        var elementName = match.Groups["elementName"].Value;
+                        var propertyType = match.Groups["propertyType"].Value;
+                        var propertyName = match.Groups["propertyName"].Value;
+                        //  if (string.IsNullOrEmpty(elementName))
+                        classContent = classContent.Replace(match.Value, match.Value.Replace(xmlElementAttribute, xmlElementAttribute + "\"" + propertyName + "\", "))
+                            .Replace(", )", ")");;
+                    }
+
+
 
                     // auto-implemented getters & setters
                     foreach (Match match in Regex.Matches(classContent, @"public (?<propertyType>\S+) (?<propertyName>\S+)(?<getterSetter>\s+\{\s+get\s+\{\s+return this\.(?<fieldName>[^;]+);\s+}\s+set\s+\{\s+[^;]+;\s+\}\s+\})"))
@@ -134,7 +162,8 @@ namespace FancyWsdl
                         var getterSetter = match.Groups["getterSetter"].Value;
 
                         classContent = Regex.Replace(classContent, $@"(?<pre>public \S+)(?<post> {propertyName} )", m => m.Groups["pre"].Value + "?" + m.Groups["post"].Value);
-                        classContent = classContent.Replace(match.Value, match.Value.Replace(getterSetter, $"=> this.{propertyName}.HasValue;"));
+                        classContent = classContent.Replace(match.Value, match.Value.Replace(getterSetter, $"=> this.{modPascalCase(propertyName)}.HasValue;"));
+//\                        classContent = classContent.Replace(match.Value, pre + newPropertyName + post);
                     }
 
                     // method name in SoapDocumentMethodAttribute
@@ -162,6 +191,7 @@ namespace FancyWsdl
 
                         classContent = classContent.Replace(match.Value, pre + PascalCase(methodName) + inter + ((!string.IsNullOrEmpty(methodName2)) ? "nameof(" + PascalCase(methodName2) + ")" : "") + post);
                     }
+             
                     foreach (Match match in Regex.Matches(classContent, @"public void (?<methodName>[^\s\(]+)"))
                     {
                         var methodName = match.Groups["methodName"].Value;
@@ -229,9 +259,13 @@ namespace FancyWsdl
                 fileContent = fileContent.Replace("Attribute()]", "]");
                 fileContent = fileContent.Replace("Attribute(", "(");
 
-                fileContent=AddAnnotations(args, fileContent);
+
+                fileContent =AddAnnotations(args, fileContent);
 
                 fileContent = Fix(fileContent);
+
+                fileContent = fileContent.Replace("public object Item { get; set; }", "[System.Text.Json.Serialization.JsonConverter(typeof(JWR.GiisDmdk.Sdk.Converters.ObjectTypedJsonConverter))]\n\t\tpublic object Item { get; set; }");
+
 
                 File.WriteAllText(path, fileContent, encoding);
             }
@@ -241,8 +275,8 @@ namespace FancyWsdl
 
         public static string Fix(string fileContent)
         {
-            static string modPascalCase(string s) => Regex.Replace(NormalizeClassesName(s), @"(^|\s+)(?<letter>\S)", m => m.Groups["letter"].Value.ToUpper());
 
+            Console.WriteLine("Финишное форматирование....");
             // enumerate all class definitions
             foreach (Match classMatch in Regex.Matches(fileContent, @"^(?<space>\s*)public partial class (?<className>\S+).*?\n(\k<space>)}", RegexOptions.Singleline | RegexOptions.Multiline))
             {
@@ -257,30 +291,28 @@ namespace FancyWsdl
                     var post = match.Groups["post"].Value;
 
                     var newPropertyName = modPascalCase(propertyName);
-
-                    if (newPropertyName != propertyName)
-                        pre = $"[System.Xml.Serialization.XmlElementAttribute(ElementName = \"{propertyName}\")]\n\t\t" + pre;
+                    if (className == newPropertyName)
+                        newPropertyName += "Prop";
 
                     classContent = classContent.Replace(match.Value, pre + newPropertyName + post);
                     classContent = classContent.Replace($"this.{propertyName} ", $"this.{newPropertyName} ");
                     classContent = classContent.Replace($@".SoapHeaderAttribute(""{propertyName}"")", $@".SoapHeaderAttribute(""{newPropertyName}"")");
                 }
 
-                // method name with uppercase first letter
-                foreach (Match match in Regex.Matches(classContent, @"(?<pre>public \S+ (Begin|End)?)(?<methodName>[^\s\(]+)(?<inter>(Async)?[^\n]*(\n[^\n]*){1,4}this\.(Begin|End)?Invoke(Async)?\()(""(?<methodName2>[^""]+)"")?(?<post>)"))
+                // property names with uppercase first letter
+                foreach (Match match in Regex.Matches(classContent, @"(?<pre>public \S+ )(?<propertyName>\S+)(?<post>\s+=>)"))
                 {
                     var pre = match.Groups["pre"].Value;
-                    var methodName = match.Groups["methodName"].Value;
-                    var inter = match.Groups["inter"].Value;
-                    var methodName2 = match.Groups["methodName2"].Value;
+                    var propertyName = match.Groups["propertyName"].Value;
                     var post = match.Groups["post"].Value;
 
-                    classContent = classContent.Replace(match.Value, pre + modPascalCase(methodName) + inter + ((!string.IsNullOrEmpty(methodName2)) ? "nameof(" + modPascalCase(methodName2) + ")" : "") + post);
-                }
-                foreach (Match match in Regex.Matches(classContent, @"public void (?<methodName>[^\s\(]+)"))
-                {
-                    var methodName = match.Groups["methodName"].Value;
-                    classContent = Regex.Replace(classContent, $@"(?<pre>( |\.)){methodName}(?<post>[\(\)])", m => m.Groups["pre"].Value + modPascalCase(methodName) + m.Groups["post"].Value);
+                    var newPropertyName = modPascalCase(propertyName);
+                    if (className == newPropertyName)
+                        newPropertyName += "Prop";
+
+                    classContent = classContent.Replace(match.Value, pre + newPropertyName + post);
+                    classContent = classContent.Replace($"this.{propertyName} ", $"this.{newPropertyName} ");
+                    classContent = classContent.Replace($@".SoapHeaderAttribute(""{propertyName}"")", $@".SoapHeaderAttribute(""{newPropertyName}"")");
                 }
 
                 fileContent = fileContent.Replace(classMatch.Value, classContent);
