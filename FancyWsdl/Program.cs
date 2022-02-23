@@ -82,6 +82,7 @@ namespace FancyWsdl
                 var fileContent = File.ReadAllText(path, encoding);
                 fileContent=fileContent.Replace("[System.Xml.Serialization.XmlElement]", "[System.Xml.Serialization.XmlElement()]");
                 fileContent=fileContent.Replace("[System.Xml.Serialization.XmlAttribute]", "[System.Xml.Serialization.XmlAttribute()]");
+                fileContent=fileContent.Replace("[System.Xml.Serialization.XmlArray]", "[System.Xml.Serialization.XmlArrayAttribute()]");
                 fileContent=fileContent.Replace("[System.Xml.Serialization.XmlAttributeAttribute]", "[System.Xml.Serialization.XmlAttributeAttribute()]");
                 fileContent=fileContent.Replace("[System.Xml.Serialization.XmlElementAttribute]", "[System.Xml.Serialization.XmlElement()]");
 
@@ -123,7 +124,18 @@ namespace FancyWsdl
                             .Replace(", )", ")");;
                     }
 
-
+                    // property name in XmlArrayAttribute    
+                    //foreach (Match match in Regex.Matches(classContent, @"\[(?<xmlElementAttribute>(System.Xml.Serialization.)?XmlElement(Attribute)?\()(""(?<elementName>[^""]+)"")?[^\)]*\)\]\s+public (?<propertyType>\S+) (?<propertyName>\S+)"))
+                    foreach (Match match in Regex.Matches(classContent, @"\[(?<xmlAttribute>(System.Xml.Serialization.)?XmlArray(Attribute)?\()(""(?<elementName>[^""]+)"")?[^\)]*\)\]([\s\S]+?)public (?<propertyType>\S+) (?<propertyName>\S+)"))
+                    {
+                        var xmlElementAttribute = match.Groups["xmlAttribute"].Value;
+                        var elementName = match.Groups["elementName"].Value;
+                        var propertyType = match.Groups["propertyType"].Value;
+                        var propertyName = match.Groups["propertyName"].Value;
+                        //  if (string.IsNullOrEmpty(elementName))
+                        classContent = classContent.Replace(match.Value, match.Value.Replace(xmlElementAttribute, xmlElementAttribute + "\"" + propertyName + "\", "))
+                            .Replace(", )", ")"); ;
+                    }
 
                     // auto-implemented getters & setters
                     foreach (Match match in Regex.Matches(classContent, @"public (?<propertyType>\S+) (?<propertyName>\S+)(?<getterSetter>\s+\{\s+get\s+\{\s+return this\.(?<fieldName>[^;]+);\s+}\s+set\s+\{\s+[^;]+;\s+\}\s+\})"))
