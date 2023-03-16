@@ -70,6 +70,9 @@ namespace FancyWsdl
                 File.Delete(cfName);
 
             var http = new GostHttpClient(args[3], null);
+          
+            Console.WriteLine($"Загрузка схемы {args[2]} в файл {args[4]}");
+            
             if (!http.DownloadWsdl(args[2], args[4], CancellationToken.None))
             {
                 Console.WriteLine("Error download wsdl as file");
@@ -376,7 +379,7 @@ namespace FancyWsdl
         /// <returns></returns>
         private static string AddAnnotations(string[] args, string fileContent)
         {
-            foreach (var schemaUrl in args.Skip(2))
+            foreach (var schemaUrl in args.Skip(4))
             {
                 Console.WriteLine($"Документирование файла: {schemaUrl}");
 
