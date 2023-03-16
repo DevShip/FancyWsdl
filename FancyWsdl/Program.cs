@@ -6,6 +6,8 @@ using System.Linq;
 using System.Reflection;
 using System.Text;
 using System.Text.RegularExpressions;
+using System.Threading;
+using System.Threading.Tasks;
 using System.Web;
 using System.Xml;
 using FancyWsdl.Extensions;
@@ -18,17 +20,19 @@ namespace FancyWsdl
         {
             get
             {
-                string codeBase = Assembly.GetExecutingAssembly().CodeBase;
-                UriBuilder uri = new UriBuilder(codeBase);
-                string path = Uri.UnescapeDataString(uri.Path);
+                var codeBase = Assembly.GetExecutingAssembly().CodeBase;
+                var uri = new UriBuilder(codeBase);
+                var path = Uri.UnescapeDataString(uri.Path);
                 return Path.GetDirectoryName(path);
             }
         }
 
         private static void Run(string fileName, string args, string path)
         {
-            var info = new ProcessStartInfo(fileName, args);
-            info.WorkingDirectory = path;
+            var info = new ProcessStartInfo(fileName, args)
+            {
+                WorkingDirectory = path
+            };
             Process.Start(info)?.WaitForExit();
         }
 
@@ -36,7 +40,7 @@ namespace FancyWsdl
         static string modPascalCase(string s) => Regex.Replace(NormalizeClassesName(s), @"(^|\s+)(?<letter>\S)", m => m.Groups["letter"].Value.ToUpper());
 
         // Thx https://github.com/Kaupisch-IT/FancyWsdl
-        static void Main(string[] args)
+        static  void Main(string[] args)
         {
             Directory.SetCurrentDirectory(AssemblyDirectory);
 
@@ -47,14 +51,16 @@ namespace FancyWsdl
                 if (ConfigurationManager.AppSettings.HasKeys()
                     && ConfigurationManager.AppSettings["CSFileName"].TryGetNotNullOrEmpty(out var csName)
                     && ConfigurationManager.AppSettings["Namespace"].TryGetNotNullOrEmpty(out var nsName)
-                    && ConfigurationManager.AppSettings["WSDLscheme"].TryGetNotNullOrEmpty(out var wsdlName))
+                    && ConfigurationManager.AppSettings["CertificateSerial"].TryGetNotNullOrEmpty(out var certificateSerial)
+                    && ConfigurationManager.AppSettings["WSDLscheme"].TryGetNotNullOrEmpty(out var wsdlName)
+                    && ConfigurationManager.AppSettings["WsdlFileName"].TryGetNotNullOrEmpty(out var wsdlFileName))
                 {
-                    args = new[] { csName, nsName, wsdlName };
+                    args = new[] { csName, nsName, wsdlName , certificateSerial, wsdlFileName };
                 }
                 else
                 {
                     Console.WriteLine("Программа требует заполнение .app.Settings или 3 аргумента программы например: FancyWsdl.exe ИмяФайла.cs ОбластьИменCsФайла ИмяИлиАдресСхемыWsdl\n");
-                    return;
+                    return ;
                 }
 
             }
@@ -63,16 +69,22 @@ namespace FancyWsdl
             if (File.Exists(cfName))
                 File.Delete(cfName);
 
+            var http = new GostHttpClient(args[3], null);
+            if (!http.DownloadWsdl(args[2], args[4], CancellationToken.None))
+            {
+                Console.WriteLine("Error download wsdl as file");
+                return;
+            }
+
             //  /importXmlTypes /messageContract  /tcv:Version35  /out={args[0]}
             // --noTypeReuse 
-            var arg = $"{args[2]}  --noTypeReuse  -n \"*,{args[1]}\" -d \"ServiceReference\" -o \"{args[0]}\" -tf \"netstandard2.0\"";
+            var arg = $"{args[4]}  --noTypeReuse  -n \"*,{args[1]}\" -d \"ServiceReference\" -o \"{args[0]}\" -tf \"netstandard2.0\"";
+          
             Console.WriteLine($"Running> dotnet-svcutil {arg}");
 
             Run("dotnet-svcutil", arg, Directory.GetCurrentDirectory());
 
             args[0] = cfName;
-
-
 
             if (args.Any())
             {
@@ -80,15 +92,15 @@ namespace FancyWsdl
 
                 var encoding = Encoding.UTF8;
                 var fileContent = File.ReadAllText(path, encoding);
-                fileContent=fileContent.Replace("[System.Xml.Serialization.XmlElement]", "[System.Xml.Serialization.XmlElement()]");
-                fileContent=fileContent.Replace("[System.Xml.Serialization.XmlAttribute]", "[System.Xml.Serialization.XmlAttribute()]");
-                fileContent=fileContent.Replace("[System.Xml.Serialization.XmlArray]", "[System.Xml.Serialization.XmlArrayAttribute()]");
-                fileContent=fileContent.Replace("[System.Xml.Serialization.XmlAttributeAttribute]", "[System.Xml.Serialization.XmlAttributeAttribute()]");
-                fileContent=fileContent.Replace("[System.Xml.Serialization.XmlElementAttribute]", "[System.Xml.Serialization.XmlElement()]");
+                fileContent = fileContent.Replace("[System.Xml.Serialization.XmlElement]", "[System.Xml.Serialization.XmlElement()]");
+                fileContent = fileContent.Replace("[System.Xml.Serialization.XmlAttribute]", "[System.Xml.Serialization.XmlAttribute()]");
+                fileContent = fileContent.Replace("[System.Xml.Serialization.XmlArray]", "[System.Xml.Serialization.XmlArrayAttribute()]");
+                fileContent = fileContent.Replace("[System.Xml.Serialization.XmlAttributeAttribute]", "[System.Xml.Serialization.XmlAttributeAttribute()]");
+                fileContent = fileContent.Replace("[System.Xml.Serialization.XmlElementAttribute]", "[System.Xml.Serialization.XmlElement()]");
 
                 Console.WriteLine($"Форматирование файла: {path}");
-                bool anotaded=false;
-       
+                bool anotaded = false;
+
                 // enumerate all class definitions
                 foreach (Match classMatch in Regex.Matches(fileContent, @"^(?<space>\s*)public partial class (?<className>\S+).*?\n(\k<space>)}", RegexOptions.Singleline | RegexOptions.Multiline))
                 {
@@ -107,7 +119,7 @@ namespace FancyWsdl
                         {
                             classContent = classContent.Replace(match.Value, match.Value.Replace(xmlElementAttribute, xmlElementAttribute + "\"" + propertyName + "\", "))
                                 .Replace(", )", ")");
-                            
+
                         }
                     }
 
@@ -121,7 +133,7 @@ namespace FancyWsdl
                         var propertyName = match.Groups["propertyName"].Value;
                         //  if (string.IsNullOrEmpty(elementName))
                         classContent = classContent.Replace(match.Value, match.Value.Replace(xmlElementAttribute, xmlElementAttribute + "\"" + propertyName + "\", "))
-                            .Replace(", )", ")");;
+                            .Replace(", )", ")"); ;
                     }
 
                     // property name in XmlArrayAttribute    
@@ -175,7 +187,7 @@ namespace FancyWsdl
 
                         classContent = Regex.Replace(classContent, $@"(?<pre>public \S+)(?<post> {propertyName} )", m => m.Groups["pre"].Value + "?" + m.Groups["post"].Value);
                         classContent = classContent.Replace(match.Value, match.Value.Replace(getterSetter, $"=> this.{modPascalCase(propertyName)}.HasValue;"));
-//\                        classContent = classContent.Replace(match.Value, pre + newPropertyName + post);
+                        //\                        classContent = classContent.Replace(match.Value, pre + newPropertyName + post);
                     }
 
                     // method name in SoapDocumentMethodAttribute
@@ -203,7 +215,7 @@ namespace FancyWsdl
 
                         classContent = classContent.Replace(match.Value, pre + PascalCase(methodName) + inter + ((!string.IsNullOrEmpty(methodName2)) ? "nameof(" + PascalCase(methodName2) + ")" : "") + post);
                     }
-             
+
                     foreach (Match match in Regex.Matches(classContent, @"public void (?<methodName>[^\s\(]+)"))
                     {
                         var methodName = match.Groups["methodName"].Value;
@@ -272,7 +284,7 @@ namespace FancyWsdl
                 fileContent = fileContent.Replace("Attribute(", "(");
 
 
-                fileContent =AddAnnotations(args, fileContent);
+                fileContent = AddAnnotations(args, fileContent);
 
                 fileContent = Fix(fileContent);
 
@@ -289,6 +301,10 @@ namespace FancyWsdl
         {
 
             Console.WriteLine("Финишное форматирование....");
+
+            fileContent = fileContent.Replace("// <auto-generated>",
+                $"// <auto-generated>\n// Файл создан: {DateTime.Now}\n//");
+
             // enumerate all class definitions
             foreach (Match classMatch in Regex.Matches(fileContent, @"^(?<space>\s*)public partial class (?<className>\S+).*?\n(\k<space>)}", RegexOptions.Singleline | RegexOptions.Multiline))
             {
@@ -380,17 +396,28 @@ namespace FancyWsdl
                     var classContent = classMatch.Value;
                     var rootName = classMatch.Groups["rootName"].Value;
 
-                    static string ToSummary(string text, string indentSpace)
+                    static string ToSummary(string srcText, string indentSpace)
                     {
-                        var lines = text.Trim().Replace("\r", "").Split('\n');
+                        var lines = srcText.Trim().Replace("\r", "").Split('\n');
                         for (var i = 0; i < lines.Length; i++)
                         {
                             lines[i] = lines[i].Trim();
                         }
 
-                        text = HttpUtility.HtmlEncode(string.Join("\n", lines).Trim());
-                        return text.Contains("\n") ? $"/// <summary>{indentSpace}/// {Regex.Replace(text, "\r?\n", indentSpace + "/// ")}{indentSpace}/// </summary>"
+                        var text = HttpUtility.HtmlEncode(string.Join("\n", lines).Trim());
+
+                        text = text.Contains("\n")
+                            ? $"/// <summary>{indentSpace}/// {Regex.Replace(text, "\r?\n", indentSpace + "/// ")}{indentSpace}/// </summary>"
                             : $"/// <summary> {text} </summary>";
+
+                        var desc = srcText.Replace("\n", " ").Replace("\r", "").Trim();
+
+                        if (!string.IsNullOrEmpty(desc))
+                        {
+                            text += $"\n[System.ComponentModel.DescriptionAttribute(\"{desc}\")]";
+                        }
+
+                        return text;
                     }
 
                     // element documentation
